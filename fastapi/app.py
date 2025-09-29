@@ -93,7 +93,23 @@ class FastAPI(APIRouter):
     def post(self, path: str, *, response_model: Optional[type] = None):  # type: ignore[override]
         return super().post(path, response_model=response_model)
 
-    async def __call__(self, scope: Dict[str, Any], receive: Callable[[], Awaitable[Dict[str, Any]]], send: Callable[[Dict[str, Any]], Awaitable[None]]) -> None:
+
+    def __call__(
+        self,
+        scope: Dict[str, Any],
+        receive: Optional[Callable[[], Awaitable[Dict[str, Any]]]] = None,
+        send: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ):
+        if receive is None or send is None:
+            return _ASGI2Instance(self, scope)
+        return self._asgi(scope, receive, send)
+
+    async def _asgi(
+        self,
+        scope: Dict[str, Any],
+        receive: Callable[[], Awaitable[Dict[str, Any]]],
+        send: Callable[[Dict[str, Any]], Awaitable[None]],
+    ) -> None:
         scope_type = scope.get("type")
         if scope_type == "lifespan":
             await _handle_lifespan(receive, send)
@@ -121,6 +137,19 @@ class FastAPI(APIRouter):
 
         await _send_response(send, status_code=404, payload={"detail": "Not Found"})
 
+
+
+class _ASGI2Instance:
+    def __init__(self, app: "FastAPI", scope: Dict[str, Any]) -> None:
+        self._app = app
+        self._scope = scope
+
+    async def __call__(
+        self,
+        receive: Callable[[], Awaitable[Dict[str, Any]]],
+        send: Callable[[Dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        await self._app._asgi(self._scope, receive, send)
 
 class TestClient:
     __test__ = False
