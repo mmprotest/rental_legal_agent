@@ -8,6 +8,7 @@ interactions without a database dependency.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from datetime import date, datetime, timezone
 from typing import Dict, List, Optional
 from urllib.request import urlopen
@@ -27,10 +28,12 @@ from api.models.schemas import (
     IntakeRequest,
     IntakeResponse,
     LawIngestResponse,
+    AskResponse,
     LawCitation,
     LawSearchResponse,
     ReasoningStep,
 )
+from llm import ChatMessage, LLMClient, safe_json_loads
 
 
 @dataclass
@@ -258,6 +261,79 @@ class CaseStore:
         # Register with retriever's runtime index
         self.agents.retriever.add_runtime(result, keywords)
         return LawIngestResponse(added=True, result=result)
+
+    # ------------------------------------------------------------------
+    # General legal Q&A
+    # ------------------------------------------------------------------
+    def ask(self, question: str, top_k: int) -> AskResponse:
+        text = (question or "").lower()
+        # Safety: prohibit violence and advise lawful steps (generic)
+        if any(term in text for term in ["hurt", "harm", "violence", "attack", "kill", "assault"]):
+            safety_answer = (
+                "You must not harm anyone. Violence is illegal. Use lawful options: document the issue, try to resolve directly if safe, "
+                "seek help from your rental provider/agent if relevant, and contact the appropriate authority (e.g., Consumer Affairs Victoria, council, or police) depending on the problem."
+            )
+            retrieval = self.agents.retrieve_law(query=question, top_k=top_k)
+            citations = [
+                LawCitation(url=r.source_url, point=r.snippet.split(".")[0].strip(), as_of=r.as_of_date)
+                for r in retrieval.results[:3]
+            ]
+            return AskResponse(answer=safety_answer, citations=citations)
+
+        # Semantic retrieval
+        retrieval = self.agents.retrieve_law(query=question, top_k=max(6, top_k))
+        # Prefer results with token overlap to reduce generic answers
+        q_tokens = {t for t in (question or "").lower().split() if len(t) > 2}
+        filtered = [r for r in retrieval.results if any(tok in r.title.lower() or tok in r.snippet.lower() for tok in q_tokens)]
+        ranked = filtered if filtered else retrieval.results
+        law_payload = [
+            {"id": i + 1, "title": r.title, "url": r.source_url, "summary": r.snippet, "as_of": str(r.as_of_date)}
+            for i, r in enumerate(ranked[:6])
+        ]
+        # Direct ask chain (bypass category enums)
+        llm = LLMClient()
+        system_prompt = (
+            "You are a Victorian renting law assistant. Answer the user's question in plain English using ONLY the provided law summaries. "
+            "Do not include unrelated topics. Be specific and practical. "
+            "Respond ONLY as JSON with keys: answer (string), citations (array of {url, point, as_of})."
+        )
+        user_prompt = {
+            "question": question,
+            "law": law_payload,
+            "requirements": {
+                "jurisdiction": "Victoria, Australia",
+                "citations_required": True,
+                "no_extra_prose": True,
+            },
+        }
+        raw = llm.chat([
+            ChatMessage(role="system", content=system_prompt),
+            ChatMessage(role="user", content=json.dumps(user_prompt)),
+        ], temperature=0.2)
+        data = safe_json_loads(raw)
+        answer = data.get("answer") or ""
+        cit_payload = data.get("citations") or []
+        citations: List[LawCitation] = []
+        for c in cit_payload:
+            try:
+                citations.append(
+                    LawCitation(
+                        url=c.get("url", ""),
+                        point=c.get("point", ""),
+                        as_of=date.fromisoformat(c.get("as_of", str(date.today()))),
+                    )
+                )
+            except Exception:
+                continue
+        # If model returned nothing useful, synthesize from retrieval
+        if not answer:
+            answer = " ".join([item["summary"] for item in law_payload[:2]])[:800]
+        if not citations:
+            citations = [
+                LawCitation(url=r.source_url, point=r.snippet.split(".")[0].strip(), as_of=r.as_of_date)
+                for r in retrieval.results[:3]
+            ]
+        return AskResponse(answer=answer, citations=citations)
 
     # ------------------------------------------------------------------
     # Helpers

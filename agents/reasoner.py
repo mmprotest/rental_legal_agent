@@ -31,11 +31,26 @@ class ReasonerAgent:
             " Respond ONLY with a compact JSON object with keys: explanation, steps, deadlines, citations."
             " Do not include any prose before or after the JSON. #agent:reasoner"
         )
+        # Provide a compact schema and explicit tasking for higher answer quality
         user_prompt = json.dumps(
             {
-                "category": payload.category.value,
-                "facts": payload.facts,
-                "law": payload.law_summaries,
+                "task": "answer",
+                "question": payload.facts.get("question") or payload.facts.get("issue") or "",
+                "context": {
+                    "category": payload.category.value,
+                    "facts": payload.facts,
+                    "law": payload.law_summaries,
+                },
+                "constraints": {
+                    "jurisdiction": "Victoria, Australia",
+                    "citations_required": True,
+                },
+                "output_schema": {
+                    "explanation": "string",
+                    "steps": ["string"],
+                    "deadlines": [{"title": "string", "description": "string", "due_in_days": "number"}],
+                    "citations": [{"url": "string", "point": "string", "as_of": "YYYY-MM-DD"}],
+                },
             }
         )
         raw = self.llm.chat(

@@ -14,6 +14,18 @@ function prettyPrint(target, data) {
   target.textContent = JSON.stringify(data, null, 2);
 }
 
+function renderPlainAnswer(target, answer, citations) {
+  const lines = [];
+  if (answer) lines.push(answer);
+  if (citations && citations.length) {
+    lines.push('\nSources:');
+    citations.forEach(c => {
+      lines.push(`- ${c.point ? c.point + ' — ' : ''}${c.url}`);
+    });
+  }
+  target.textContent = lines.join('\n');
+}
+
 async function handleIntake(event) {
   event.preventDefault();
   const formData = new FormData(intakeForm);
@@ -43,7 +55,7 @@ async function runReasoner() {
   if (!currentCaseId) return;
   const response = await fetch(`/api/case/${currentCaseId}/reason`, { method: 'POST' });
   const data = await response.json();
-  prettyPrint(reasonOutput, data);
+  renderPlainAnswer(reasonOutput, data.explanation_plain, data.law_citations);
 }
 
 async function draftLetter() {
@@ -54,7 +66,9 @@ async function draftLetter() {
     body: JSON.stringify({ template: 'repairs_urgent', channel: 'docx' }),
   });
   const data = await response.json();
-  prettyPrint(draftOutput, data);
+  const subject = data.preview_subject || '(no subject)';
+  const body = data.preview_body || '(no body)';
+  draftOutput.textContent = `${subject}\n\n${body}\n\nDownload: ${data.urls.docx}`;
 }
 
 async function refreshCase() {
@@ -68,3 +82,26 @@ intakeForm.addEventListener('submit', handleIntake);
 reasonBtn.addEventListener('click', runReasoner);
 draftBtn.addEventListener('click', draftLetter);
 refreshBtn.addEventListener('click', refreshCase);
+
+// Chat-style Ask UI
+const askForm = document.createElement('form');
+askForm.id = 'ask-form';
+askForm.innerHTML = `
+  <h2>Ask a legal question</h2>
+  <label>
+    Your question
+    <textarea name="question" rows="3" placeholder="e.g., Is no hot water an urgent repair in Victoria?"></textarea>
+  </label>
+  <button type="submit">Ask</button>
+  <pre id="ask-output" class="output"></pre>
+`;
+document.querySelector('main.container').appendChild(askForm);
+const askOutput = askForm.querySelector('#ask-output');
+askForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const form = new FormData(askForm);
+  const question = form.get('question') || '';
+  const res = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }) });
+  const ans = await res.json();
+  renderPlainAnswer(askOutput, ans.answer, ans.citations);
+});

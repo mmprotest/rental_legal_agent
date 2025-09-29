@@ -189,6 +189,16 @@ class LawSearchResponse(BaseModel):
     results: List[LawSearchResult]
 
 
+class AskRequest(BaseModel):
+    question: str
+    top_k: int = 3
+
+
+class AskResponse(BaseModel):
+    answer: str
+    citations: List[LawCitation]
+
+
 class LawIngestRequest(BaseModel):
     url: str
 
@@ -218,4 +228,6 @@ __all__ = [
     "ReasoningStep",
     "LawIngestRequest",
     "LawIngestResponse",
+    "AskRequest",
+    "AskResponse",
 ]

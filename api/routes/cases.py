@@ -23,6 +23,8 @@ from api.models.schemas import (
     LawSearchResponse,
     LawIngestRequest,
     LawIngestResponse,
+    AskRequest,
+    AskResponse,
 )
 from api.services.case_store import case_store
 
@@ -90,6 +92,13 @@ def ingest_law(request: LawIngestRequest) -> LawIngestResponse:
     """Fetch a URL and add it to the in-memory law corpus at runtime."""
 
     return case_store.ingest_law(request.url)
+
+
+@router.post("/ask", response_model=AskResponse)
+def ask_legal(request: AskRequest) -> AskResponse:
+    """Answer general legal questions with citations."""
+
+    return case_store.ask(request.question, request.top_k)
 
 
 def _parse_uuid(value: str):
