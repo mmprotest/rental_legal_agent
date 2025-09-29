@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import inspect
+import json
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, get_type_hints
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, get_type_hints
 
 from . import responses
 from .exceptions import HTTPException
@@ -92,6 +93,62 @@ class FastAPI(APIRouter):
     def post(self, path: str, *, response_model: Optional[type] = None):  # type: ignore[override]
         return super().post(path, response_model=response_model)
 
+    def __call__(
+        self,
+        scope: Dict[str, Any],
+        receive: Optional[Callable[[], Awaitable[Dict[str, Any]]]] = None,
+        send: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
+    ):
+        if receive is None or send is None:
+            return _ASGI2Instance(self, scope)
+        return self._asgi(scope, receive, send)
+
+    async def _asgi(
+        self,
+        scope: Dict[str, Any],
+        receive: Callable[[], Awaitable[Dict[str, Any]]],
+        send: Callable[[Dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        scope_type = scope.get("type")
+        if scope_type == "lifespan":
+            await _handle_lifespan(receive, send)
+            return
+        if scope_type != "http":
+            raise RuntimeError(f"Unsupported ASGI scope: {scope_type}")
+
+        method = scope.get("method", "").upper()
+        path = scope.get("path", "")
+        body = await _receive_json_body(receive)
+
+        for route in self.routes:
+            if route.method != method:
+                continue
+            matched, params = route.matches(path)
+            if not matched:
+                continue
+            try:
+                result = route.invoke(path_params=params, body=body)
+            except HTTPException as exc:
+                await _send_response(send, status_code=exc.status_code, payload={"detail": exc.detail})
+                return
+            await _send_response(send, status_code=200, payload=responses.serialize(result))
+            return
+
+        await _send_response(send, status_code=404, payload={"detail": "Not Found"})
+
+
+class _ASGI2Instance:
+    def __init__(self, app: "FastAPI", scope: Dict[str, Any]) -> None:
+        self._app = app
+        self._scope = scope
+
+    async def __call__(
+        self,
+        receive: Callable[[], Awaitable[Dict[str, Any]]],
+        send: Callable[[Dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        await self._app._asgi(self._scope, receive, send)
+
 
 class TestClient:
     __test__ = False
@@ -123,6 +180,44 @@ def _parse_body(annotation: type, payload: Dict[str, Any]) -> Any:
     if hasattr(annotation, "from_dict"):
         return annotation.from_dict(payload)
     return payload
+
+
+async def _handle_lifespan(receive: Callable[[], Awaitable[Dict[str, Any]]], send: Callable[[Dict[str, Any]], Awaitable[None]]) -> None:
+    while True:
+        message = await receive()
+        message_type = message.get("type")
+        if message_type == "lifespan.startup":
+            await send({"type": "lifespan.startup.complete"})
+        elif message_type == "lifespan.shutdown":
+            await send({"type": "lifespan.shutdown.complete"})
+            return
+
+
+async def _receive_json_body(receive: Callable[[], Awaitable[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
+    body_bytes = b""
+    while True:
+        message = await receive()
+        body_bytes += message.get("body", b"")
+        if not message.get("more_body", False):
+            break
+    if not body_bytes:
+        return None
+    try:
+        return json.loads(body_bytes.decode())
+    except json.JSONDecodeError:
+        return None
+
+
+async def _send_response(send: Callable[[Dict[str, Any]], Awaitable[None]], *, status_code: int, payload: Any) -> None:
+    body = json.dumps(payload).encode()
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status_code,
+            "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
 
 __all__ = ["APIRouter", "FastAPI", "HTTPException", "TestClient"]
 
