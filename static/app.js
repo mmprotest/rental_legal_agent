@@ -1,3 +1,4 @@
+
 const state = {
   apiBase: localStorage.getItem('rla.apiBase') || '',
   caseId: null,
@@ -63,9 +64,11 @@ async function apiFetch(path, options = {}) {
   return data;
 }
 
+
 function prettyPrint(target, data) {
   target.textContent = JSON.stringify(data, null, 2);
 }
+
 
 function ensureCaseLoaded() {
   if (!state.caseId) {
@@ -225,10 +228,12 @@ intakeForm.addEventListener('submit', async (event) => {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+
   const payload = {
     renter: { full_name: formData.get('renter_name') || '' },
     issue: formData.get('issue') || '',
     free_text: formData.get('free_text') || '',
+
     answers: {
       category: formData.get('issue_category') || '',
       first_reported: formData.get('first_reported') || '',
