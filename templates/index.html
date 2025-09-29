@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Rental Legal Navigator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Rental Legal Navigator</h1>
+      <p>
+        This prototype lets you run the intake, reasoning, and drafting agents. Configure your OpenAI-compatible endpoint with
+        <code>OPENAI_API_KEY</code> and <code>OPENAI_API_BASE</code> or use the built-in stub for offline demos.
+      </p>
+
+      <section>
+        <h2>1. Intake</h2>
+        <form id="intake-form">
+          <label>
+            Renter name
+            <input type="text" name="renter_name" required value="Ada Tenant" />
+          </label>
+          <label>
+            Issue description
+            <input type="text" name="issue" required value="Urgent repairs - no hot water" />
+          </label>
+          <label>
+            Additional details
+            <textarea name="free_text" rows="3" placeholder="Add any context"></textarea>
+          </label>
+          <button type="submit">Create case</button>
+        </form>
+        <pre id="intake-output" class="output"></pre>
+      </section>
+
+      <section id="case-actions" hidden>
+        <h2>2. Run agents</h2>
+        <div class="grid">
+          <button id="reason-btn" type="button">Run Reasoner</button>
+          <button id="draft-btn" type="button">Draft Letter</button>
+          <button id="refresh-btn" type="button">Refresh Case</button>
+        </div>
+        <h3>Reasoning</h3>
+        <pre id="reason-output" class="output"></pre>
+        <h3>Draft</h3>
+        <pre id="draft-output" class="output"></pre>
+        <h3>Case snapshot</h3>
+        <pre id="case-output" class="output"></pre>
+      </section>
+    </main>
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>
