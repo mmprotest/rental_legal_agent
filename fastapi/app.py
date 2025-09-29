@@ -93,6 +93,7 @@ class FastAPI(APIRouter):
     def post(self, path: str, *, response_model: Optional[type] = None):  # type: ignore[override]
         return super().post(path, response_model=response_model)
 
+
     def __call__(
         self,
         scope: Dict[str, Any],
@@ -137,6 +138,7 @@ class FastAPI(APIRouter):
         await _send_response(send, status_code=404, payload={"detail": "Not Found"})
 
 
+
 class _ASGI2Instance:
     def __init__(self, app: "FastAPI", scope: Dict[str, Any]) -> None:
         self._app = app
@@ -148,7 +150,6 @@ class _ASGI2Instance:
         send: Callable[[Dict[str, Any]], Awaitable[None]],
     ) -> None:
         await self._app._asgi(self._scope, receive, send)
-
 
 class TestClient:
     __test__ = False
