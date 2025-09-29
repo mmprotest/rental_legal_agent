@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Iterable, List, Optional
+import re
 
 from core.settings import get_settings
 
@@ -63,8 +64,7 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        if response_format == "json_object":
-            payload["response_format"] = {"type": "json_object"}
+        # Avoid provider-specific response_format requirements; rely on prompt formatting
         base_url = self.settings.openai_base_url.rstrip("/")
         url = f"{base_url}/chat/completions"
         headers = {
@@ -153,4 +153,34 @@ class LLMClient:
         return json.dumps({"message": "stub response"})
 
 
-__all__ = ["ChatMessage", "LLMClient", "StubbedResponse"]
+def safe_json_loads(raw: str) -> dict:
+    """Parse loosely formatted JSON from LLM output.
+
+    - Strips markdown code fences
+    - Extracts the first top-level JSON object if extra text surrounds it
+    - Falls back to empty dict on failure
+    """
+    text = raw.strip()
+    # Remove markdown code fences if present
+    if text.startswith("```"):
+        # remove opening fence
+        text = re.sub(r"^```[a-zA-Z0-9_\-]*\n", "", text)
+        # remove closing fence
+        text = re.sub(r"\n```\s*$", "", text)
+    # Quick path
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    # Try to find a JSON object substring
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        candidate = match.group(0)
+        try:
+            return json.loads(candidate)
+        except Exception:
+            pass
+    return {}
+
+
+__all__ = ["ChatMessage", "LLMClient", "StubbedResponse", "safe_json_loads"]

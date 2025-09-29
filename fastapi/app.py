@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
+import json
 from typing import Any, Callable, Dict, List, Optional, Tuple, get_type_hints
 
 from . import responses
@@ -83,6 +84,12 @@ class FastAPI(APIRouter):
         self.version = version
         self.description = description
 
+    # ------------------------------------------------------------------
+    # Minimal ASGI adapter so the shim can run under uvicorn
+    # ------------------------------------------------------------------
+    def __call__(self, scope):  # ASGI2 interface - returns an instance
+        return _ASGIApp(self, scope)
+
     def include_router(self, router: APIRouter) -> None:
         self.routes.extend(router.routes)
 
@@ -126,3 +133,88 @@ def _parse_body(annotation: type, payload: Dict[str, Any]) -> Any:
 
 __all__ = ["APIRouter", "FastAPI", "HTTPException", "TestClient"]
 
+
+class _ASGIApp:
+    def __init__(self, app: FastAPI, scope: Dict[str, Any]) -> None:
+        self.app = app
+        self.scope = scope
+
+    async def __call__(self, receive, send) -> None:
+        if self.scope.get("type") != "http":
+            # Only HTTP supported; return 404 for others
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 404,
+                    "headers": [(b"content-type", b"text/plain; charset=utf-8")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b"Not Found"})
+            return
+
+        method: str = self.scope.get("method", "GET").upper()
+        path: str = self.scope.get("path", "/")
+
+        # Read request body (best-effort, small bodies only)
+        body_bytes = b""
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                continue
+            body_bytes += message.get("body", b"")
+            if not message.get("more_body"):
+                break
+
+        json_payload: Optional[Dict[str, Any]] = None
+        if body_bytes:
+            try:
+                json_payload = json.loads(body_bytes.decode("utf-8"))
+            except Exception:
+                json_payload = None
+
+        # Route matching
+        for route in self.app.routes:
+            if route.method != method:
+                continue
+            matched, params = route.matches(path)
+            if not matched:
+                continue
+            try:
+                result = route.invoke(path_params=params, body=json_payload)
+                status_code = 200
+                body_obj = responses.serialize(result)
+            except HTTPException as exc:
+                status_code = exc.status_code
+                body_obj = {"detail": exc.detail}
+
+            if isinstance(body_obj, (dict, list)):
+                data = json.dumps(body_obj).encode("utf-8")
+                content_type = b"application/json; charset=utf-8"
+            elif isinstance(body_obj, str):
+                data = body_obj.encode("utf-8")
+                # Basic content-type detection
+                lower_path = path.lower()
+                if lower_path.endswith(".js") or lower_path.startswith("/static/"):
+                    content_type = b"text/javascript; charset=utf-8"
+                elif "<html" in body_obj.lower():
+                    content_type = b"text/html; charset=utf-8"
+                else:
+                    content_type = b"text/plain; charset=utf-8"
+            else:
+                data = str(body_obj).encode("utf-8")
+                content_type = b"text/plain; charset=utf-8"
+
+            headers = [(b"content-type", content_type), (b"content-length", str(len(data)).encode("ascii"))]
+            await send({"type": "http.response.start", "status": status_code, "headers": headers})
+            await send({"type": "http.response.body", "body": data})
+            return
+
+        # No route matched
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 404,
+                "headers": [(b"content-type", b"application/json; charset=utf-8")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"{\"detail\": \"Not Found\"}"})

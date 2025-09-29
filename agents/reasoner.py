@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from typing import List
 
 from api.models.schemas import CaseCategory, CaseReasoningResponse, LawCitation, ReasoningStep
-from llm import ChatMessage, LLMClient
+from llm import ChatMessage, LLMClient, safe_json_loads
 
 
 @dataclass
@@ -28,8 +28,8 @@ class ReasonerAgent:
         system_prompt = (
             "You are a compliance-locked legal explainer for Victorian renters."
             " Only use the supplied law snippets."
-            " Respond in JSON with keys explanation, steps, deadlines, citations."\
-            " #agent:reasoner"
+            " Respond ONLY with a compact JSON object with keys: explanation, steps, deadlines, citations."
+            " Do not include any prose before or after the JSON. #agent:reasoner"
         )
         user_prompt = json.dumps(
             {
@@ -46,19 +46,44 @@ class ReasonerAgent:
             temperature=0.2,
             response_format="json_object",
         )
-        data = json.loads(raw)
+        data = safe_json_loads(raw)
+        if not data:
+            # Minimal deterministic fallback based on provided law
+            law_points = [item.get("summary", "") for item in payload.law_summaries]
+            explanation = " ".join(law_points)[:600]
+            return CaseReasoningResponse(
+                explanation_plain=explanation,
+                steps=[],
+                law_citations=[],
+                deadlines=[],
+                as_of_date=date.today(),
+            )
         explanation = data.get("explanation", "")
         steps = data.get("steps", [])
+        # Normalize steps: accept list of strings or list of dicts with title/description
+        norm_steps: List[str] = []
+        for item in steps:
+            if isinstance(item, str):
+                norm_steps.append(item)
+            elif isinstance(item, dict):
+                title = item.get("title") or item.get("step") or "Step"
+                desc = item.get("description") or ""
+                norm_steps.append(f"{title}: {desc}".strip())
         citation_dicts = data.get("citations", [])
         deadlines_payload = data.get("deadlines", [])
-        citations = [
-            LawCitation(
-                url=item["url"],
-                point=item.get("point", ""),
-                as_of=date.fromisoformat(item.get("as_of", date.today().isoformat())),
-            )
-            for item in citation_dicts
-        ]
+        citations: List[LawCitation] = []
+        for item in citation_dicts:
+            try:
+                citations.append(
+                    LawCitation(
+                        url=item.get("url", ""),
+                        point=item.get("point", ""),
+                        as_of=date.fromisoformat(item.get("as_of", date.today().isoformat())),
+                    )
+                )
+            except Exception:
+                # Skip malformed citation entries
+                continue
         deadlines: List[ReasoningStep] = []
         today = date.today()
         for deadline in deadlines_payload:
@@ -73,7 +98,7 @@ class ReasonerAgent:
             )
         return CaseReasoningResponse(
             explanation_plain=explanation,
-            steps=steps,
+            steps=norm_steps,
             law_citations=citations,
             deadlines=deadlines,
             as_of_date=today,

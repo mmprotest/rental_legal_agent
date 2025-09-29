@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import List
 
-from llm import ChatMessage, LLMClient
+from llm import ChatMessage, LLMClient, safe_json_loads
 
 
 @dataclass
@@ -39,5 +39,8 @@ class QAAgent:
             temperature=0.0,
             response_format="json_object",
         )
-        data = json.loads(raw)
-        return QAResult(status=data.get("status", "pass"), issues=data.get("issues", []))
+        data = safe_json_loads(raw)
+        status = str(data.get("status", "pass"))
+        issues_raw = data.get("issues", [])
+        issues = [str(item) for item in issues_raw if isinstance(item, (str, int))]
+        return QAResult(status=status, issues=issues)

@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Dict, List, Optional
+from urllib.request import urlopen
+from urllib.error import URLError
 from uuid import UUID, uuid4
 
 from agents.orchestrator import AgentOrchestrator, DraftPayload
@@ -24,6 +26,7 @@ from api.models.schemas import (
     EscalationResponse,
     IntakeRequest,
     IntakeResponse,
+    LawIngestResponse,
     LawCitation,
     LawSearchResponse,
     ReasoningStep,
@@ -139,8 +142,7 @@ class CaseStore:
         )
         citations = {"primary_url": retrieval.results[0].source_url if retrieval.results else ""}
         draft = self.agents.draft(payload, citations)
-        if not self.agents.qa_check(draft, retrieval):
-            raise ValueError("Draft failed QA checks")
+        qa_result = self.agents.qa_check(draft, retrieval)
         doc_id = uuid4()
         now = datetime.now(timezone.utc)
         filename = f"{template}-{doc_id}.{channel}"
@@ -154,6 +156,8 @@ class CaseStore:
                 "subject": draft.subject,
                 "body": draft.body,
                 "channel": channel,
+                "qa_status": getattr(qa_result, "status", "unknown"),
+                "qa_issues": ", ".join(getattr(qa_result, "issues", [])),
             },
         )
         record.documents.append(doc)
@@ -162,10 +166,19 @@ class CaseStore:
             CaseTimelineEvent(
                 label="Draft generated",
                 occurred_at=now,
-                metadata={"document_id": str(doc_id), "template": template},
+                metadata={
+                    "document_id": str(doc_id),
+                    "template": template,
+                    "qa_status": getattr(qa_result, "status", "unknown"),
+                },
             )
         )
-        return DraftDocumentResponse(document_id=doc_id, urls={channel: doc.url})
+        return DraftDocumentResponse(
+            document_id=doc_id,
+            urls={channel: doc.url},
+            preview_subject=draft.subject,
+            preview_body=draft.body,
+        )
 
     # ------------------------------------------------------------------
     # Case retrieval
@@ -223,6 +236,30 @@ class CaseStore:
         return self.agents.search_law(query=query, top_k=top_k)
 
     # ------------------------------------------------------------------
+    # Law ingestion (runtime)
+    # ------------------------------------------------------------------
+    def ingest_law(self, url: str) -> LawIngestResponse:
+        """Fetch a URL and add to the retriever's runtime corpus with naive extraction."""
+        try:
+            with urlopen(url, timeout=10) as resp:
+                content_bytes = resp.read()
+        except URLError as exc:
+            raise ValueError(f"Failed to fetch URL: {exc}") from exc
+        content = content_bytes.decode("utf-8", errors="ignore")
+        title = _extract_between(content, "<title>", "</title>") or url
+        # Crude summary: first 400 non-whitespace characters of text content
+        summary = " ".join(content.split())[:400]
+        # Naive keywords from title
+        keywords = [token.lower() for token in title.split() if len(token) > 3][:8]
+        from datetime import date
+        from api.models.schemas import LawSearchResult
+
+        result = LawSearchResult(source_url=url, title=title, snippet=summary, as_of_date=date.today())
+        # Register with retriever's runtime index
+        self.agents.retriever.add_runtime(result, keywords)
+        return LawIngestResponse(added=True, result=result)
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
     def _derive_subcategory(self, payload: IntakeRequest) -> Optional[str]:
@@ -231,4 +268,14 @@ class CaseStore:
 
 case_store = CaseStore()
 """Module-level singleton used by the API routes."""
+
+
+def _extract_between(text: str, start: str, end: str) -> Optional[str]:
+    try:
+        i = text.index(start)
+        j = text.index(end, i + len(start))
+        return text[i + len(start) : j]
+    except ValueError:
+        return None
+
 

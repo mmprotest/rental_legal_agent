@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from api.models.schemas import CaseCategory, LawSearchResponse, LawSearchResult
 from knowledge import LAW_SOURCES
@@ -17,6 +17,13 @@ class RetrievalContext:
 class LawRetrieverAgent:
     """Keyword matching against the curated knowledge base."""
 
+    def __init__(self) -> None:
+        # runtime_index stores url -> (result, keywords)
+        self._runtime_index: Dict[str, tuple[LawSearchResponse.__args__[0], List[str]]] = {}
+
+    def add_runtime(self, result: LawSearchResponse.__args__[0], keywords: List[str]) -> None:
+        self._runtime_index[result.source_url] = (result, keywords)
+
     def retrieve(
         self,
         query: str,
@@ -25,6 +32,7 @@ class LawRetrieverAgent:
     ) -> RetrievalContext:
         scores: List[tuple[int, LawSearchResult]] = []
         query_lower = query.lower()
+        # static sources
         for source in LAW_SOURCES:
             score = 0
             if category:
@@ -50,6 +58,14 @@ class LawRetrieverAgent:
                     as_of_date=source.as_of,
                 )
                 scores.append((score, result))
+        # runtime sources
+        for url, (res, keywords) in self._runtime_index.items():
+            score = 0
+            for keyword in keywords:
+                if keyword in query_lower:
+                    score += 2
+            if score:
+                scores.append((score, res))
         scores.sort(key=lambda item: item[0], reverse=True)
         top_results = [result for _, result in scores[:top_k]]
         if len(top_results) < top_k:
@@ -68,6 +84,15 @@ class LawRetrieverAgent:
                 seen_urls.add(source.url)
                 if len(top_results) >= top_k:
                     break
+            # fill from runtime if still short
+            if len(top_results) < top_k:
+                for url, (res, _) in self._runtime_index.items():
+                    if url in seen_urls:
+                        continue
+                    top_results.append(res)
+                    seen_urls.add(url)
+                    if len(top_results) >= top_k:
+                        break
         return RetrievalContext(results=top_results)
 
     def search(self, query: str, top_k: int) -> LawSearchResponse:

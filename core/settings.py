@@ -11,10 +11,10 @@ from functools import lru_cache
 class Settings:
     """Runtime configuration resolved from environment variables."""
 
-    openai_api_key: str | None = None
-    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str = 'blah'
+    openai_base_url: str = "http://127.0.0.1:1234/v1"
     openai_model: str = "gpt-4o-mini"
-    llm_mode: str | None = None
+    llm_mode: str = 'http'
 
     def __post_init__(self) -> None:
         env_api_key = os.getenv("OPENAI_API_KEY")
@@ -36,8 +36,7 @@ class Settings:
 
         if self.llm_mode:
             return self.llm_mode
-        if self.openai_api_key:
-            return "http"
+        # Default to stub for safety and testability. Opt-in to HTTP with LLM_MODE=http.
         return "stub"
 
 

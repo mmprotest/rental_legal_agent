@@ -9,7 +9,7 @@ from api.models.schemas import CaseCategory, CaseReasoningResponse, IntakeReques
 from agents.drafter import DraftResult, LetterDrafterAgent
 from agents.intake import IntakeAgent, IntakeResult
 from agents.law_retriever import LawRetrieverAgent, RetrievalContext
-from agents.qa import QAAgent
+from agents.qa import QAAgent, QAResult
 from agents.reasoner import ReasonerAgent, ReasonerInput
 from agents.scheduler import SchedulerAgent
 from llm import LLMClient
@@ -51,7 +51,12 @@ class AgentOrchestrator:
         self, category: CaseCategory, facts: Dict[str, str], retrieval: RetrievalContext
     ) -> CaseReasoningResponse:
         law_payload = [
-            {"title": result.title, "url": result.source_url, "summary": result.snippet, "as_of": str(result.as_of_date)}
+            {
+                "title": result.title,
+                "url": result.source_url,
+                "summary": result.snippet,
+                "as_of": str(result.as_of_date),
+            }
             for result in retrieval.results
         ]
         reasoning_input = ReasonerInput(
@@ -59,7 +64,18 @@ class AgentOrchestrator:
             facts=facts,
             law_summaries=law_payload,
         )
-        return self.reasoner.run(reasoning_input)
+        response = self.reasoner.run(reasoning_input)
+        # If the LLM did not produce citations, synthesize from retrieval context
+        if not response.law_citations:
+            synthesized = []
+            from api.models.schemas import LawCitation
+            for result in retrieval.results[:3]:
+                # Use a short point from the summary
+                point = result.snippet.split(".")[0].strip()
+                synthesized.append(LawCitation(url=result.source_url, point=point, as_of=result.as_of_date))
+            if synthesized:
+                response.law_citations = synthesized
+        return response
 
     # Drafting -----------------------------------------------------------
     def draft(self, payload: DraftPayload, citations: Dict[str, str]) -> DraftResult:
@@ -68,13 +84,12 @@ class AgentOrchestrator:
         return self.drafter.run(payload.template, context)
 
     # QA -----------------------------------------------------------------
-    def qa_check(self, draft: DraftResult, retrieval: RetrievalContext) -> bool:
+    def qa_check(self, draft: DraftResult, retrieval: RetrievalContext) -> QAResult:
         citations = [
             {"url": result.source_url, "title": result.title, "as_of": str(result.as_of_date)}
             for result in retrieval.results
         ]
-        result = self.qa.run(draft.body, citations)
-        return result.passed
+        return self.qa.run(draft.body, citations)
 
     # Scheduler ----------------------------------------------------------
     def deadlines(self, category: CaseCategory):

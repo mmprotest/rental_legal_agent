@@ -46,10 +46,25 @@ class IntakeAgent:
             response_format="json_object",
         )
         data = json.loads(raw)
-        category = CaseCategory(data.get("category", "repairs_nonurgent"))
+        # Be tolerant of arbitrary category strings from the LLM
+        raw_category = data.get("category", "repairs_nonurgent")
+        try:
+            category = CaseCategory(raw_category)
+        except Exception:
+            category = CaseCategory.REPAIRS_NONURGENT
+        # Heuristic fallback if LLM gives little or no structure
+        risk_flags = data.get("risk_flags") or []
+        next_questions = data.get("next_questions") or []
+        if not risk_flags:
+            text = f"{request.issue} {request.free_text or ''}".lower()
+            if any(token in text for token in ["urgent", "no hot water", "hot water", "gas leak", "electrical"]):
+                risk_flags.append("urgent")
+                if category == CaseCategory.REPAIRS_NONURGENT:
+                    category = CaseCategory.REPAIRS_URGENT
+        subcategory = data.get("subcategory") or request.answers.get("subcategory")
         return IntakeResult(
             category=category,
-            subcategory=data.get("subcategory"),
-            risk_flags=data.get("risk_flags", []),
-            next_questions=data.get("next_questions", []),
+            subcategory=subcategory,
+            risk_flags=risk_flags,
+            next_questions=next_questions,
         )

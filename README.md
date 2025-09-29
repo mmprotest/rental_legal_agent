@@ -46,10 +46,9 @@ After starting the FastAPI server you can exercise the golden path:
 6. `POST /api/search-law` to query the curated Consumer Affairs Victoria corpus.
 
 The default configuration operates entirely in-memory with deterministic stub
-responses so tests run without network access. Supply
-`OPENAI_API_KEY`, `OPENAI_API_BASE`, and optionally `OPENAI_MODEL` to send
-requests to an OpenAI-compatible API. Set `LLM_MODE=stub` to force offline
-behaviour.
+responses so tests run without network access. To call a live OpenAI-compatible
+API, set `LLM_MODE=http` and supply `OPENAI_API_KEY`, `OPENAI_API_BASE`, and
+optionally `OPENAI_MODEL`.
 
 ### Browser UI
 

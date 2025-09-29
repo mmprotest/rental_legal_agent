@@ -21,6 +21,8 @@ from api.models.schemas import (
     IntakeResponse,
     LawSearchRequest,
     LawSearchResponse,
+    LawIngestRequest,
+    LawIngestResponse,
 )
 from api.services.case_store import case_store
 
@@ -81,6 +83,13 @@ def search_law(request: LawSearchRequest) -> LawSearchResponse:
     """Perform a placeholder legal search across the staged corpus."""
 
     return case_store.search_law(request.query, request.top_k)
+
+
+@router.post("/ingest-law", response_model=LawIngestResponse)
+def ingest_law(request: LawIngestRequest) -> LawIngestResponse:
+    """Fetch a URL and add it to the in-memory law corpus at runtime."""
+
+    return case_store.ingest_law(request.url)
 
 
 def _parse_uuid(value: str):

@@ -153,6 +153,8 @@ class DraftDocumentRequest(BaseModel):
 class DraftDocumentResponse(BaseModel):
     document_id: UUID
     urls: Dict[str, str]
+    preview_subject: Optional[str] = None
+    preview_body: Optional[str] = None
 
 
 class EscalationTarget(str, Enum):
@@ -187,6 +189,15 @@ class LawSearchResponse(BaseModel):
     results: List[LawSearchResult]
 
 
+class LawIngestRequest(BaseModel):
+    url: str
+
+
+class LawIngestResponse(BaseModel):
+    added: bool
+    result: LawSearchResult
+
+
 __all__ = [
     "CaseCategory",
     "CaseStatus",
@@ -205,4 +216,6 @@ __all__ = [
     "LawSearchResponse",
     "CaseDetailResponse",
     "ReasoningStep",
+    "LawIngestRequest",
+    "LawIngestResponse",
 ]
