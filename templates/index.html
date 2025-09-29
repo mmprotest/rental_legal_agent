@@ -4,49 +4,247 @@
     <meta charset="utf-8" />
     <title>Rental Legal Navigator</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+    />
+    <style>
+      body {
+        padding-bottom: 4rem;
+      }
+      .output-card {
+        background: var(--muted-border-color);
+        border-radius: 0.75rem;
+        padding: 1rem;
+        overflow-x: auto;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+      .chip {
+        border-radius: 999px;
+        padding: 0.2rem 0.75rem;
+        background: var(--primary-hover);
+        color: var(--primary-inverse);
+        font-size: 0.85rem;
+      }
+      #alerts {
+        margin-top: 0.5rem;
+        min-height: 1.5rem;
+        font-size: 0.95rem;
+      }
+      #timeline-list li,
+      #deadlines-list li,
+      #steps-list li,
+      #law-results li {
+        margin-bottom: 0.5rem;
+      }
+      #law-results li article {
+        padding: 0.75rem;
+        border: 1px solid var(--muted-color);
+        border-radius: 0.75rem;
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+    </style>
   </head>
   <body>
     <main class="container">
-      <h1>Rental Legal Navigator</h1>
-      <p>
-        This prototype lets you run the intake, reasoning, and drafting agents. Configure your OpenAI-compatible endpoint with
-        <code>OPENAI_API_KEY</code> and <code>OPENAI_API_BASE</code> or use the built-in stub for offline demos.
-      </p>
+      <header>
+        <hgroup>
+          <h1>Rental Legal Navigator</h1>
+          <p>
+            Coordinate intake, reasoning, drafting, and escalation flows for Victorian renter matters.
+            The UI runs entirely in your browser and talks to the FastAPI backend you point it at.
+          </p>
+        </hgroup>
+      </header>
+
+      <section class="grid">
+        <article>
+          <h2>Connect to the API</h2>
+          <form id="config-form">
+            <label>
+              API base URL
+              <input
+                type="url"
+                id="api-base"
+                name="api_base"
+                placeholder="http://localhost:8000"
+              />
+            </label>
+            <small>
+              Requests default to the same origin when left blank. Use this to test against a remote sandbox or tunnel.
+            </small>
+            <button type="submit">Save configuration</button>
+          </form>
+          <div id="alerts"></div>
+        </article>
+        <article>
+          <h2>Current case</h2>
+          <p id="case-status">No case loaded yet.</p>
+          <dl>
+            <dt>Case ID</dt>
+            <dd id="case-id">–</dd>
+            <dt>Category</dt>
+            <dd id="case-category">–</dd>
+            <dt>Status</dt>
+            <dd id="case-stage">–</dd>
+            <dt>Critical deadline</dt>
+            <dd id="case-deadline">–</dd>
+            <dt>Risk flags</dt>
+            <dd id="case-risks">–</dd>
+          </dl>
+        </article>
+      </section>
 
       <section>
         <h2>1. Intake</h2>
-        <form id="intake-form">
-          <label>
-            Renter name
-            <input type="text" name="renter_name" required value="Ada Tenant" />
-          </label>
-          <label>
-            Issue description
-            <input type="text" name="issue" required value="Urgent repairs - no hot water" />
-          </label>
-          <label>
-            Additional details
-            <textarea name="free_text" rows="3" placeholder="Add any context"></textarea>
-          </label>
-          <button type="submit">Create case</button>
+        <form id="intake-form" class="grid">
+          <article>
+            <label>
+              Renter name
+              <input type="text" name="renter_name" required value="Ada Tenant" />
+            </label>
+            <label>
+              Issue category
+              <select name="issue_category" required>
+                <option value="repairs_urgent" selected>Urgent repairs</option>
+                <option value="repairs_nonurgent">Non-urgent repairs</option>
+                <option value="rent_increase">Rent increase</option>
+                <option value="notice_to_vacate">Notice to vacate</option>
+                <option value="min_standards">Minimum standards</option>
+              </select>
+            </label>
+            <label>
+              Issue description
+              <input type="text" name="issue" required value="No hot water for 3 days" />
+            </label>
+            <label>
+              First reported date
+              <input type="date" name="first_reported" />
+            </label>
+          </article>
+          <article>
+            <label>
+              Additional details
+              <textarea name="free_text" rows="6" placeholder="Add any extra facts"></textarea>
+            </label>
+            <label>
+              Evidence links (comma separated)
+              <input type="text" name="evidence_urls" placeholder="https://…" />
+            </label>
+            <label>
+              Subcategory / signals
+              <input type="text" name="subcategory" placeholder="hot_water_out" />
+            </label>
+            <button type="submit">Create case</button>
+          </article>
         </form>
-        <pre id="intake-output" class="output"></pre>
+        <details>
+          <summary>Raw intake response</summary>
+          <pre id="intake-output" class="output-card"></pre>
+        </details>
       </section>
 
-      <section id="case-actions" hidden>
-        <h2>2. Run agents</h2>
+      <section id="case-panel" hidden>
+        <h2>2. Case workspace</h2>
         <div class="grid">
-          <button id="reason-btn" type="button">Run Reasoner</button>
-          <button id="draft-btn" type="button">Draft Letter</button>
-          <button id="refresh-btn" type="button">Refresh Case</button>
+          <article>
+            <h3>Reasoning</h3>
+            <p id="reason-explanation">Run the reasoning agent to see plain-English guidance.</p>
+            <ul id="steps-list"></ul>
+            <h4>Deadlines</h4>
+            <ul id="deadlines-list"></ul>
+            <h4>Law citations</h4>
+            <ul id="citations-list"></ul>
+            <button id="reason-btn" type="button">Run reasoner</button>
+            <details>
+              <summary>Raw reasoning payload</summary>
+              <pre id="reason-output" class="output-card"></pre>
+            </details>
+          </article>
+          <article>
+            <h3>Draft documents</h3>
+            <form id="draft-form">
+              <label>
+                Template
+                <select id="letter-template" name="template">
+                  <option value="repairs_urgent" selected>Urgent repair reimbursement</option>
+                  <option value="repairs_nonurgent">Non-urgent repair request</option>
+                  <option value="rent_increase_challenge">Rent increase challenge</option>
+                  <option value="min_standards_breach">Minimum standards breach</option>
+                  <option value="notice_to_vacate_response">Notice to vacate response</option>
+                </select>
+              </label>
+              <label>
+                Channel
+                <select id="draft-channel" name="channel">
+                  <option value="docx" selected>.docx</option>
+                  <option value="pdf">PDF</option>
+                </select>
+              </label>
+              <button type="submit">Draft letter</button>
+            </form>
+            <div class="output-card">
+              <p><strong>Latest draft</strong></p>
+              <div id="draft-output">No draft generated yet.</div>
+            </div>
+          </article>
+          <article>
+            <h3>Timeline & documents</h3>
+            <h4>Events</h4>
+            <ul id="timeline-list"></ul>
+            <h4>Documents</h4>
+            <ul id="documents-list"></ul>
+            <form id="escalate-form">
+              <label>
+                Escalate to
+                <select id="escalate-target" name="target">
+                  <option value="RDRV" selected>Rental Dispute Resolution Victoria</option>
+                  <option value="VCAT">VCAT</option>
+                </select>
+              </label>
+              <button type="submit">Generate escalation checklist</button>
+            </form>
+            <div class="output-card">
+              <p><strong>Escalation guidance</strong></p>
+              <div id="escalation-output">No escalation generated yet.</div>
+            </div>
+          </article>
         </div>
-        <h3>Reasoning</h3>
-        <pre id="reason-output" class="output"></pre>
-        <h3>Draft</h3>
-        <pre id="draft-output" class="output"></pre>
-        <h3>Case snapshot</h3>
-        <pre id="case-output" class="output"></pre>
+        <footer>
+          <button id="refresh-btn" type="button">Refresh case snapshot</button>
+        </footer>
+        <details>
+          <summary>Raw case payload</summary>
+          <pre id="case-output" class="output-card"></pre>
+        </details>
+      </section>
+
+      <section>
+        <h2>3. Law search</h2>
+        <form id="law-search-form" class="grid">
+          <div>
+            <label>
+              Query
+              <input type="text" id="law-query" required placeholder="urgent repairs reimbursement" />
+            </label>
+          </div>
+          <div>
+            <label>
+              Top K
+              <input type="number" id="law-topk" value="3" min="1" max="10" />
+            </label>
+          </div>
+          <button type="submit">Search corpus</button>
+        </form>
+        <ul id="law-results"></ul>
+
       </section>
     </main>
     <script src="/static/app.js" type="module"></script>

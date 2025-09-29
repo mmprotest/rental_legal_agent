@@ -17,11 +17,12 @@ def test_healthcheck() -> None:
 def test_ui_assets_served() -> None:
     html_response = client.get("/")
     assert html_response.status_code == 200
-    assert "Rental Legal Navigator" in html_response.json()
+    assert "Connect to the API" in html_response.json()
+    assert "Case workspace" in html_response.json()
 
     js_response = client.get("/static/app.js")
     assert js_response.status_code == 200
-    assert "intakeForm" in js_response.json()
+    assert "lawSearchForm" in js_response.json()
 
 
 def test_intake_reasoning_flow() -> None:
